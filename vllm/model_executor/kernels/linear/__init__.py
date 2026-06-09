@@ -97,6 +97,7 @@ from vllm.model_executor.kernels.linear.mxfp8.xpu import (
     XPUMxFp8LinearKernel,
 )
 from vllm.model_executor.kernels.linear.nvfp4 import (
+    NvFp4ActQuantBackend,
     NvFp4LinearKernel,
     NvFp4LinearLayerConfig,
 )
@@ -184,6 +185,16 @@ def _get_linear_backend() -> str:
     config = get_current_vllm_config_or_none()
     if config is not None:
         return config.kernel_config.linear_backend
+    return "auto"
+
+
+def _get_act_quant_backend() -> NvFp4ActQuantBackend:
+    """Get the act_quant_backend setting from the current vllm config."""
+    from vllm.config import get_current_vllm_config_or_none
+
+    config = get_current_vllm_config_or_none()
+    if config is not None:
+        return config.kernel_config.act_quant_backend
     return "auto"
 
 
@@ -848,10 +859,15 @@ _NVFP4_BACKEND_TO_KERNEL: dict[str, type[NvFp4LinearKernel]] = {
 }
 
 
-def init_nvfp4_linear_kernel(use_a16: bool = False) -> NvFp4LinearKernel:
+def init_nvfp4_linear_kernel(
+    use_a16: bool = False,
+    act_quant_backend: NvFp4ActQuantBackend | None = None,
+) -> NvFp4LinearKernel:
     """Select and instantiate the best NVFP4 linear kernel for the
     current platform."""
-    config = NvFp4LinearLayerConfig()
+    if act_quant_backend is None:
+        act_quant_backend = _get_act_quant_backend()
+    config = NvFp4LinearLayerConfig(act_quant_backend=act_quant_backend)
 
     # VLLM_BATCH_INVARIANT forces deterministic execution. Prefer the
     # batch-invariant CUTLASS implementation when available, otherwise fall

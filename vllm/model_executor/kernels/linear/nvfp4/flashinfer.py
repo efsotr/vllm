@@ -68,7 +68,7 @@ class FlashInferCutlassNvFp4LinearKernel(NvFp4LinearKernel):
             x,
             layer.input_global_scale_inv,
             is_sf_swizzled_layout=True,
-            backend="flashinfer-cutlass",
+            backend=self.config.get_act_quant_backend("flashinfer-cutlass"),
             padded_n=x.shape[-1] + weights_padding_bytes * 2,
         )
 
@@ -197,7 +197,7 @@ class FlashInferCudnnNvFp4LinearKernel(NvFp4LinearKernel):
             x,
             layer.input_global_scale_inv,
             is_sf_swizzled_layout=True,
-            backend="flashinfer-cudnn",
+            backend=self.config.get_act_quant_backend("flashinfer-cudnn"),
             padded_n=x.shape[-1] + weights_padding_bytes * 2,
         )
 
@@ -261,7 +261,7 @@ class FlashInferB12xNvFp4LinearKernel(NvFp4LinearKernel):
             x,
             layer.input_global_scale_inv,
             is_sf_swizzled_layout=True,
-            backend="b12x",
+            backend=self.config.get_act_quant_backend("b12x"),
         )
 
         x_fp4 = pad_nvfp4_activation_for_cutlass(

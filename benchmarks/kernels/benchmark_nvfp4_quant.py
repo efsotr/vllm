@@ -22,6 +22,12 @@ FLOAT8_E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max
 PROVIDER_CFGS = {
     "vllm": dict(backend="vllm", is_sf_swizzled_layout=False, enabled=True),
     "vllm-swizzle": dict(backend="vllm", is_sf_swizzled_layout=True, enabled=True),
+    "scalesweep_mse": dict(
+        backend="scalesweep_mse", is_sf_swizzled_layout=False, enabled=True
+    ),
+    "scalesweep_mse-swizzle": dict(
+        backend="scalesweep_mse", is_sf_swizzled_layout=True, enabled=True
+    ),
     "flashinfer": dict(backend="flashinfer", is_sf_swizzled_layout=False, enabled=True),
     "flashinfer-swizzle": dict(
         backend="flashinfer", is_sf_swizzled_layout=True, enabled=True
@@ -65,19 +71,25 @@ def benchmark(batch_size, provider, N, K):
 
     cfg = PROVIDER_CFGS[provider]
 
-    if cfg["backend"] == "vllm":
+    if cfg["backend"] in ("vllm", "scalesweep_mse"):
         # vLLM's FP4 quantization
         if cfg["is_sf_swizzled_layout"]:
             ms, min_ms, max_ms = triton.testing.do_bench_cudagraph(
                 lambda: ops.scaled_fp4_quant(
-                    a, a_global_scale, is_sf_swizzled_layout=True
+                    a,
+                    a_global_scale,
+                    is_sf_swizzled_layout=True,
+                    backend=cfg["backend"],
                 ),
                 quantiles=quantiles,
             )
         else:
             ms, min_ms, max_ms = triton.testing.do_bench_cudagraph(
                 lambda: ops.scaled_fp4_quant(
-                    a, a_global_scale, is_sf_swizzled_layout=False
+                    a,
+                    a_global_scale,
+                    is_sf_swizzled_layout=False,
+                    backend=cfg["backend"],
                 ),
                 quantiles=quantiles,
             )
@@ -172,7 +184,7 @@ def test_accuracy():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark NVFP4 quantization: vLLM vs FlashInfer"
+        description="Benchmark NVFP4 quantization: vLLM vs ScaleSweep MSE vs FlashInfer"
     )
     parser.add_argument(
         "--models",

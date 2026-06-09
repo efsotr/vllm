@@ -2,10 +2,16 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import torch
+import torch.nn.functional as F
 
+from vllm._custom_ops import scaled_fp4_quant
 from vllm.model_executor.layers.quantization.utils.nvfp4_emulation_utils import (
+    dequantize_to_dtype,
     kE2M1ToFloat_handle,
     run_nvfp4_emulations,
+)
+from vllm.model_executor.layers.quantization.utils.scalesweep_mse_nvfp4_utils import (
+    _use_scalesweep_mse_emulation,
 )
 
 from .base import NvFp4LinearKernel, NvFp4LinearLayerConfig
@@ -36,6 +42,33 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if _use_scalesweep_mse_emulation():
+            group_size = 16
+            x_fp4, x_blockscale = scaled_fp4_quant(
+                x,
+                layer.input_global_scale_inv,
+                is_sf_swizzled_layout=False,
+                backend="scalesweep_mse",
+            )
+            x_dq = dequantize_to_dtype(
+                x_fp4,
+                x_blockscale,
+                1.0 / layer.input_global_scale_inv,
+                torch.bfloat16,
+                group_size,
+                swizzle=False,
+            ).view(*x.shape)
+            w_dq = dequantize_to_dtype(
+                layer.weight.data.view(torch.uint8),
+                layer.weight_scale.data,
+                layer.weight_global_scale,
+                torch.bfloat16,
+                group_size,
+                swizzle=False,
+            )
+            bias_bf16 = None if bias is None else bias.to(torch.bfloat16)
+            return F.linear(x_dq, w_dq, bias_bf16).to(dtype=x.dtype)
+
         out = run_nvfp4_emulations(
             x=x,
             input_global_scale=layer.input_global_scale_inv,
