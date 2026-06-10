@@ -147,13 +147,23 @@ ScaleSweep MSE kernel path.
 When the NVFP4 linear backend is `emulation`, the same environment variable
 switches activation handling to:
 
-1. `scaled_fp4_quant(..., backend="scalesweep_mse")`
-2. dequantize the activation FP4 result to BF16
-3. dequantize NVFP4 weights to BF16
-4. call `torch.nn.functional.linear`
+1. adjust `input_global_scale_inv` after loading from the standard NVFP4
+   448-based scale convention to the ScaleSweep MSE 256-based scale convention
+2. `scaled_fp4_quant(..., backend="scalesweep_mse")`
+3. dequantize the activation FP4 result to BF16 with the ScaleSweep
+   `torch.compile` PyTorch table-lookup helper
+4. dequantize NVFP4 weights to BF16
+5. call `torch.nn.functional.linear`
 
 Without `SCALESWEEP_MSE_EMULATION=1`, the existing NVFP4 emulation path is
 unchanged.
+
+ScaleSweep MSE emulation must be run with eager execution. The emulation path
+uses Python/Triton helpers for activation quantization and dequantization;
+capturing this path through vLLM's default torch.compile/CUDA graph mode can
+produce degenerate repeated-token generations even though eager execution
+produces normal outputs. Validation scripts for this mode should therefore pass
+`enforce_eager=True`.
 
 ## Benchmarks
 

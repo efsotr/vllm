@@ -1761,7 +1761,7 @@ def scaled_fp4_quant(
         )
         if use_scalesweep_mse:
             from vllm.model_executor.layers.quantization.utils import (
-                scalesweep_mse_nvfp4_utils as scalesweep_utils,
+                scalesweep_mse_nvfp4_utils 
             )
 
             torch.ops.vllm.scalesweep_mse_nvfp4_quant.out(

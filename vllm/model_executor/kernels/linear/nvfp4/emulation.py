@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import torch
-import torch.nn.functional as F
 
 from vllm._custom_ops import scaled_fp4_quant
 from vllm.model_executor.layers.quantization.utils.nvfp4_emulation_utils import (
@@ -12,9 +11,12 @@ from vllm.model_executor.layers.quantization.utils.nvfp4_emulation_utils import 
 )
 from vllm.model_executor.layers.quantization.utils.scalesweep_mse_nvfp4_utils import (
     _use_scalesweep_mse_emulation,
+    scalesweep_mse_nvfp4_dequantize,
 )
 
 from .base import NvFp4LinearKernel, NvFp4LinearLayerConfig
+
+_SCALESWEEP_MSE_GLOBAL_SCALE_INV_FACTOR = 256.0 / 448.0
 
 
 class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
@@ -35,6 +37,15 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
         # Move the E2M1 lookup table to the device now, because
         # `.to(device)` is not allowed during CUDA graph capture.
         kE2M1ToFloat_handle.val = kE2M1ToFloat_handle.val.to(layer.weight.device)
+        if _use_scalesweep_mse_emulation() and not getattr(
+            layer, "_scalesweep_mse_input_scale_adjusted", False
+        ):
+            layer.input_global_scale_inv = torch.nn.Parameter(
+                layer.input_global_scale_inv
+                * _SCALESWEEP_MSE_GLOBAL_SCALE_INV_FACTOR,
+                requires_grad=False,
+            )
+            layer._scalesweep_mse_input_scale_adjusted = True
 
     def apply_weights(
         self,
@@ -49,12 +60,11 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
                 is_sf_swizzled_layout=False,
                 backend="scalesweep_mse",
             )
-            x_dq = dequantize_to_dtype(
+            x_dq = scalesweep_mse_nvfp4_dequantize(
                 x_fp4,
                 x_blockscale,
                 1.0 / layer.input_global_scale_inv,
                 x.dtype,
-                swizzle=False,
             ).view(*x.shape)
             w_dq = dequantize_to_dtype(
                 layer.weight.data.view(torch.uint8),
@@ -63,7 +73,7 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
                 x.dtype,
                 swizzle=False,
             )
-            return F.linear(x_dq, w_dq, bias)
+            return torch.nn.functional.linear(x_dq, w_dq, bias)
 
         out = run_nvfp4_emulations(
             x=x,

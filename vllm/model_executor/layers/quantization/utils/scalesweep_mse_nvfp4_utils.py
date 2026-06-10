@@ -16,10 +16,58 @@ LOWER_BOUND = -3
 UPPER_BOUND = 7
 FP4_E2M1_MAX = 6.0
 REF_MAX_SCALE_RAW = 126
+_FP4_E2M1_TABLE = [
+    0.0,
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    3.0,
+    4.0,
+    6.0,
+    -0.0,
+    -0.5,
+    -1.0,
+    -1.5,
+    -2.0,
+    -3.0,
+    -4.0,
+    -6.0,
+]
 
 
 def _use_scalesweep_mse_emulation() -> bool:
     return bool(int(os.getenv("SCALESWEEP_MSE_EMULATION", "0")))
+
+
+@torch.compile
+def scalesweep_mse_nvfp4_dequantize(
+    tensor_fp4: torch.Tensor,
+    tensor_sf: torch.Tensor,
+    global_scale: torch.Tensor,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    assert tensor_fp4.dtype == torch.uint8
+
+    m, packed_k = tensor_fp4.shape
+    k = packed_k * 2
+    num_blocks = k // BLOCK_SIZE
+
+    fp4_table = torch.tensor(
+        _FP4_E2M1_TABLE,
+        dtype=torch.float32,
+        device=tensor_fp4.device,
+    )
+    fp4_bytes = tensor_fp4.view(m, num_blocks, BLOCK_SIZE // 2)
+    low = fp4_bytes & 0x0F
+    high = (fp4_bytes >> 4) & 0x0F
+    nibbles = torch.stack((low, high), dim=-1)
+    values = fp4_table[nibbles.long()].reshape(m, num_blocks, BLOCK_SIZE)
+
+    scale = tensor_sf.view(torch.float8_e4m3fn).to(torch.float32)
+    scale = scale.reshape(m, num_blocks) * global_scale
+    out = values * scale.unsqueeze(-1)
+    return out.reshape(m, k).to(dtype)
 
 
 @triton.jit
@@ -91,33 +139,54 @@ def _fp32x16_to_e2m1_u32x2(
 
 
 @triton.jit
+def _round_nearest_even_i32(x):
+    x = x.to(tl.float32)
+    return tl.inline_asm_elementwise(
+        asm="cvt.rni.s32.f32 $0, $1;",
+        constraints="=r,f",
+        args=[x],
+        dtype=tl.int32,
+        is_pure=True,
+        pack=1,
+    )
+
+
+@triton.jit
 def _fp32_to_e2m1_nibble_emulation(x):
-    sign_bit = tl.where(x < 0.0, 8, 0).to(tl.uint32)
+    x_bits = x.to(tl.uint32, bitcast=True)
+    sign_bit = ((x_bits >> 28) & 8) * (x != 0.0).to(tl.uint32)
     abs_x = tl.abs(x)
-    magnitude = tl.full(abs_x.shape, 0, tl.uint32)
-    magnitude = tl.where((abs_x > 0.25) & (abs_x < 0.75), 1, magnitude)
-    magnitude = tl.where((abs_x >= 0.75) & (abs_x <= 1.25), 2, magnitude)
-    magnitude = tl.where((abs_x > 1.25) & (abs_x < 1.75), 3, magnitude)
-    magnitude = tl.where((abs_x >= 1.75) & (abs_x <= 2.5), 4, magnitude)
-    magnitude = tl.where((abs_x > 2.5) & (abs_x < 3.5), 5, magnitude)
-    magnitude = tl.where((abs_x >= 3.5) & (abs_x <= 5.0), 6, magnitude)
-    magnitude = tl.where(abs_x > 5.0, 7, magnitude)
+    le_2 = abs_x <= 2.0
+    ge_4 = abs_x >= 4.0
+    le_2_i = le_2.to(tl.uint32)
+    ge_4_i = ge_4.to(tl.uint32)
+    le_2_f = le_2.to(tl.float32)
+    ge_4_f = ge_4.to(tl.float32)
+
+    exp_inv = 1.0 + le_2_f - ge_4_f * 0.5
+    offset = 2 + ge_4_i * 2 - le_2_i * 2
+
+    rounded = _round_nearest_even_i32(abs_x * exp_inv).to(tl.uint32)
+    magnitude = tl.minimum(rounded + offset, 7)
     return sign_bit | magnitude
 
 
 @triton.jit
 def _fp32_to_e2m1_float_emulation(x):
-    sign = tl.where(x < 0.0, -1.0, 1.0)
+    x_bits = x.to(tl.uint32, bitcast=True)
     abs_x = tl.abs(x)
-    out = tl.full(abs_x.shape, 0.0, tl.float32)
-    out = tl.where((abs_x > 0.25) & (abs_x < 0.75), 0.5, out)
-    out = tl.where((abs_x >= 0.75) & (abs_x <= 1.25), 1.0, out)
-    out = tl.where((abs_x > 1.25) & (abs_x < 1.75), 1.5, out)
-    out = tl.where((abs_x >= 1.75) & (abs_x <= 2.5), 2.0, out)
-    out = tl.where((abs_x > 2.5) & (abs_x < 3.5), 3.0, out)
-    out = tl.where((abs_x >= 3.5) & (abs_x <= 5.0), 4.0, out)
-    out = tl.where(abs_x > 5.0, 6.0, out)
-    return out * sign
+    le_2 = abs_x <= 2.0
+    ge_4 = abs_x >= 4.0
+    le_2_f = le_2.to(tl.float32)
+    ge_4_f = ge_4.to(tl.float32)
+
+    exp = 1.0 - le_2_f * 0.5 + ge_4_f
+    exp_inv = 1.0 + le_2_f - ge_4_f * 0.5
+
+    rounded = _round_nearest_even_i32(abs_x * exp_inv).to(tl.float32)
+    out = tl.minimum(rounded * exp, 6.0)
+    out_bits = out.to(tl.uint32, bitcast=True) | (x_bits & 0x80000000)
+    return out_bits.to(tl.float32, bitcast=True)
 
 
 @triton.jit
@@ -373,29 +442,29 @@ def _load_normalized_16_cols(ptr, block_offsets, block_mask, global_scale_inv):
 
 
 SCALESWEEP_CONFIGS = [
-    triton.Config({"BLOCKS_PER_PROGRAM": 32}, num_warps=1),
-    triton.Config({"BLOCKS_PER_PROGRAM": 64}, num_warps=2),
-    triton.Config({"BLOCKS_PER_PROGRAM": 128}, num_warps=4),
-    triton.Config({"BLOCKS_PER_PROGRAM": 256}, num_warps=8),
+    # triton.Config({"BLOCKS_PER_PROGRAM": 32}, num_warps=1),
+    # triton.Config({"BLOCKS_PER_PROGRAM": 64}, num_warps=2),
+    # triton.Config({"BLOCKS_PER_PROGRAM": 128}, num_warps=4),
+    # triton.Config({"BLOCKS_PER_PROGRAM": 256}, num_warps=8),
     triton.Config({"BLOCKS_PER_PROGRAM": 512}, num_warps=16),
-    triton.Config({"BLOCKS_PER_PROGRAM": 1024}, num_warps=32),
+    # triton.Config({"BLOCKS_PER_PROGRAM": 1024}, num_warps=32),
 ]
 
 
-@triton.heuristics({"LOG2_NUM_ROW": lambda args: int(math.log2(args["NUM_ROW"]))})
-@triton.autotune(
-    configs=SCALESWEEP_CONFIGS,
-    key=[
-        "LOG2_NUM_ROW",
-        "BLOCKS_PER_COL_IN",
-        "BLOCKS_PER_COL_OUT",
-        "LOWER_BOUND",
-        "NUM_CANDIDATES",
-        "MAX_SCALE_RAW",
-        "IS_SWIZZLE_SCALE",
-        "BLOCKS_PER_COL_OUT_PAD",
-    ],
-)
+# @triton.heuristics({"LOG2_NUM_ROW": lambda args: int(math.log2(args["NUM_ROW"]))})
+# @triton.autotune(
+#     configs=SCALESWEEP_CONFIGS,
+#     key=[
+#         "LOG2_NUM_ROW",
+#         "BLOCKS_PER_COL_IN",
+#         "BLOCKS_PER_COL_OUT",
+#         "LOWER_BOUND",
+#         "NUM_CANDIDATES",
+#         "MAX_SCALE_RAW",
+#         "IS_SWIZZLE_SCALE",
+#         "BLOCKS_PER_COL_OUT_PAD",
+#     ],
+# )
 @triton.jit
 def _scalesweep_mse_nvfp4_quant_kernel(
     input_ptr,
@@ -411,7 +480,7 @@ def _scalesweep_mse_nvfp4_quant_kernel(
     MAX_SCALE_RAW: tl.constexpr,
     IS_SWIZZLE_SCALE: tl.constexpr,
     BLOCKS_PER_COL_OUT_PAD: tl.constexpr,
-    LOG2_NUM_ROW: tl.constexpr,
+    # LOG2_NUM_ROW: tl.constexpr,
     BLOCKS_PER_PROGRAM: tl.constexpr,
 ):
     global_scale_inv = tl.load(global_scale_inv_ptr)
@@ -540,6 +609,8 @@ def scalesweep_mse_nvfp4_quant_out(
         MAX_SCALE_RAW=REF_MAX_SCALE_RAW,
         IS_SWIZZLE_SCALE=is_sf_swizzled_layout,
         BLOCKS_PER_COL_OUT_PAD=round_up(blocks_per_col_out, 4),
+        BLOCKS_PER_PROGRAM=512,
+        num_warps=16,
     )
 
 
@@ -605,7 +676,9 @@ direct_register_custom_op(
 direct_register_custom_op(
     "scalesweep_mse_nvfp4_quant.out",
     scalesweep_mse_nvfp4_quant_out,
+    mutates_args=["output", "output_scale"],
     fake_impl=_scalesweep_mse_nvfp4_quant_out_fake,
+    tags=(torch.Tag.out_variant,),
 )
 
 
