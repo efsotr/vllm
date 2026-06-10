@@ -43,7 +43,6 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if _use_scalesweep_mse_emulation():
-            group_size = 16
             x_fp4, x_blockscale = scaled_fp4_quant(
                 x,
                 layer.input_global_scale_inv,
@@ -54,20 +53,17 @@ class EmulationNvFp4LinearKernel(NvFp4LinearKernel):
                 x_fp4,
                 x_blockscale,
                 1.0 / layer.input_global_scale_inv,
-                torch.bfloat16,
-                group_size,
+                x.dtype,
                 swizzle=False,
             ).view(*x.shape)
             w_dq = dequantize_to_dtype(
                 layer.weight.data.view(torch.uint8),
                 layer.weight_scale.data,
                 layer.weight_global_scale,
-                torch.bfloat16,
-                group_size,
+                x.dtype,
                 swizzle=False,
             )
-            bias_bf16 = None if bias is None else bias.to(torch.bfloat16)
-            return F.linear(x_dq, w_dq, bias_bf16).to(dtype=x.dtype)
+            return F.linear(x_dq, w_dq, bias)
 
         out = run_nvfp4_emulations(
             x=x,

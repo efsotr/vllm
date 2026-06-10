@@ -287,6 +287,13 @@ def _scaled_fp32x16_e2m1_quant_squared_error_emulation(
     return err
 
 
+if _use_scalesweep_mse_emulation():
+    _fp32x16_to_e2m1_u32x2 = _fp32x16_to_e2m1_u32x2_emulation
+    _scaled_fp32x16_e2m1_quant_squared_error = (
+        _scaled_fp32x16_e2m1_quant_squared_error_emulation
+    )
+
+
 @triton.jit
 def _fp32x16_e2m1_quant_squared_error(
     v0, v1, v2, v3,
@@ -295,30 +302,17 @@ def _fp32x16_e2m1_quant_squared_error(
     v12, v13, v14, v15,
     inv_scale,
     scale,
-    USE_EMULATION: tl.constexpr,
 ):
-    if USE_EMULATION:
-        squared_error = _scaled_fp32x16_e2m1_quant_squared_error_emulation(
-            v0 * inv_scale, v1 * inv_scale,
-            v2 * inv_scale, v3 * inv_scale,
-            v4 * inv_scale, v5 * inv_scale,
-            v6 * inv_scale, v7 * inv_scale,
-            v8 * inv_scale, v9 * inv_scale,
-            v10 * inv_scale, v11 * inv_scale,
-            v12 * inv_scale, v13 * inv_scale,
-            v14 * inv_scale, v15 * inv_scale,
-        )
-    else:
-        squared_error = _scaled_fp32x16_e2m1_quant_squared_error(
-            v0 * inv_scale, v1 * inv_scale,
-            v2 * inv_scale, v3 * inv_scale,
-            v4 * inv_scale, v5 * inv_scale,
-            v6 * inv_scale, v7 * inv_scale,
-            v8 * inv_scale, v9 * inv_scale,
-            v10 * inv_scale, v11 * inv_scale,
-            v12 * inv_scale, v13 * inv_scale,
-            v14 * inv_scale, v15 * inv_scale,
-        )
+    squared_error = _scaled_fp32x16_e2m1_quant_squared_error(
+        v0 * inv_scale, v1 * inv_scale,
+        v2 * inv_scale, v3 * inv_scale,
+        v4 * inv_scale, v5 * inv_scale,
+        v6 * inv_scale, v7 * inv_scale,
+        v8 * inv_scale, v9 * inv_scale,
+        v10 * inv_scale, v11 * inv_scale,
+        v12 * inv_scale, v13 * inv_scale,
+        v14 * inv_scale, v15 * inv_scale,
+    )
     return squared_error * (scale * scale)
 
 
@@ -400,7 +394,6 @@ SCALESWEEP_CONFIGS = [
         "MAX_SCALE_RAW",
         "IS_SWIZZLE_SCALE",
         "BLOCKS_PER_COL_OUT_PAD",
-        "USE_EMULATION",
     ],
 )
 @triton.jit
@@ -418,7 +411,6 @@ def _scalesweep_mse_nvfp4_quant_kernel(
     MAX_SCALE_RAW: tl.constexpr,
     IS_SWIZZLE_SCALE: tl.constexpr,
     BLOCKS_PER_COL_OUT_PAD: tl.constexpr,
-    USE_EMULATION: tl.constexpr,
     LOG2_NUM_ROW: tl.constexpr,
     BLOCKS_PER_PROGRAM: tl.constexpr,
 ):
@@ -476,7 +468,6 @@ def _scalesweep_mse_nvfp4_quant_kernel(
             v12, v13, v14, v15,
             inv_scale_i,
             scale_i,
-            USE_EMULATION,
         )
 
         better = mse_i < best_mse
@@ -499,28 +490,16 @@ def _scalesweep_mse_nvfp4_quant_kernel(
     )
 
     inv_scale = 1.0 / best_scale_fp8.to(tl.float32)
-    if USE_EMULATION:
-        lo, hi = _fp32x16_to_e2m1_u32x2_emulation(
-            v0 * inv_scale, v1 * inv_scale,
-            v2 * inv_scale, v3 * inv_scale,
-            v4 * inv_scale, v5 * inv_scale,
-            v6 * inv_scale, v7 * inv_scale,
-            v8 * inv_scale, v9 * inv_scale,
-            v10 * inv_scale, v11 * inv_scale,
-            v12 * inv_scale, v13 * inv_scale,
-            v14 * inv_scale, v15 * inv_scale,
-        )
-    else:
-        lo, hi = _fp32x16_to_e2m1_u32x2(
-            v0 * inv_scale, v1 * inv_scale,
-            v2 * inv_scale, v3 * inv_scale,
-            v4 * inv_scale, v5 * inv_scale,
-            v6 * inv_scale, v7 * inv_scale,
-            v8 * inv_scale, v9 * inv_scale,
-            v10 * inv_scale, v11 * inv_scale,
-            v12 * inv_scale, v13 * inv_scale,
-            v14 * inv_scale, v15 * inv_scale,
-        )
+    lo, hi = _fp32x16_to_e2m1_u32x2(
+        v0 * inv_scale, v1 * inv_scale,
+        v2 * inv_scale, v3 * inv_scale,
+        v4 * inv_scale, v5 * inv_scale,
+        v6 * inv_scale, v7 * inv_scale,
+        v8 * inv_scale, v9 * inv_scale,
+        v10 * inv_scale, v11 * inv_scale,
+        v12 * inv_scale, v13 * inv_scale,
+        v14 * inv_scale, v15 * inv_scale,
+    )
 
     output_i32_offsets = output_block_offsets * 2
     tl.store(output_i32_ptr + output_i32_offsets, lo, mask=output_block_mask)
@@ -561,7 +540,6 @@ def scalesweep_mse_nvfp4_quant_out(
         MAX_SCALE_RAW=REF_MAX_SCALE_RAW,
         IS_SWIZZLE_SCALE=is_sf_swizzled_layout,
         BLOCKS_PER_COL_OUT_PAD=round_up(blocks_per_col_out, 4),
-        USE_EMULATION=_use_scalesweep_mse_emulation(),
     )
 
 

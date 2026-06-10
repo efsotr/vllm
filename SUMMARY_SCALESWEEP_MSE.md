@@ -103,7 +103,8 @@ The Triton kernel uses autotune configs keyed by:
 
 ## Linear Kernel Integration
 
-`KernelConfig` exposes `act_quant_backend`.
+`KernelConfig` exposes `act_quant_backend`, and `EngineArgs` exposes the
+matching `--act-quant-backend` CLI option.
 
 Supported values include:
 
@@ -134,6 +135,14 @@ conversion pieces from inline asm to Triton emulation:
 
 All other ScaleSweep MSE kernel logic, including FP8 conversion, scale sweep,
 scale layout handling, padding behavior, and stores, remains unchanged.
+
+The environment variable is evaluated while defining the module-level Triton
+helper bindings. The selected FP4 conversion helpers are called directly from
+the kernel; emulation is not passed as a kernel flag or autotune key.
+
+This mode exists only to test ScaleSweep MSE on lower-architecture machines
+that cannot compile the inline FP4 asm. It is not the actual production
+ScaleSweep MSE kernel path.
 
 When the NVFP4 linear backend is `emulation`, the same environment variable
 switches activation handling to:
@@ -185,9 +194,6 @@ Test coverage:
   bounded ScaleSweep MSE reference chooses the same FP4 values and FP8 scales as
   a separate `torch.compile` reference that enumerates every positive FP8 E4M3
   raw scale from `1` through `REF_MAX_SCALE_RAW`.
-- `test_scalesweep_mse_nvfp4_quant_triton_emulation` - verifies
-  `SCALESWEEP_MSE_EMULATION=1`, covering the Triton-emulated FP4 conversion
-  path for both scale layouts.
 
 The reference implementation computes `input_scale` as:
 

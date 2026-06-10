@@ -1764,7 +1764,7 @@ def scaled_fp4_quant(
                 scalesweep_mse_nvfp4_utils as scalesweep_utils,
             )
 
-            scalesweep_utils.scalesweep_mse_nvfp4_quant_out(
+            torch.ops.vllm.scalesweep_mse_nvfp4_quant.out(
                 input,
                 input_global_scale,
                 is_sf_swizzled_layout,

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+import os
+
 import pytest
 import torch
 
@@ -16,7 +18,10 @@ from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
 from vllm.utils.math_utils import round_up
 
-if not current_platform.has_device_capability(100):
+if (
+    not bool(int(os.getenv("SCALESWEEP_MSE_EMULATION", "0")))
+    and not current_platform.has_device_capability(100)
+):
     pytest.skip(
         reason="NVFP4 requires compute capability of 10 or above.",
         allow_module_level=True,
@@ -476,35 +481,3 @@ def test_scalesweep_mse_matches_all_positive_fp8_reference(
 
     torch.testing.assert_close(out_ref, out_all)
     torch.testing.assert_close(scale_ref.to(torch.float32), scale_all.to(torch.float32))
-
-
-@pytest.mark.parametrize("is_sf_swizzled_layout", [True, False])
-@pytest.mark.parametrize("device", CUDA_DEVICES)
-@torch.inference_mode()
-def test_scalesweep_mse_nvfp4_quant_triton_emulation(
-    is_sf_swizzled_layout: bool,
-    device: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("SCALESWEEP_MSE_EMULATION", "1")
-    generator = torch.Generator(device=device)
-    generator.manual_seed(42)
-    x = torch.randn((3, 64), device=device, dtype=torch.float16, generator=generator)
-    global_scale_inv = compute_global_scale_inv(x)
-
-    out_ref, scale_ref = ref_scalesweep_mse_nvfp4_quant(x, global_scale_inv)
-    out, out_scale = ops.scaled_fp4_quant(
-        x,
-        global_scale_inv,
-        is_sf_swizzled_layout=is_sf_swizzled_layout,
-        backend="scalesweep_mse",
-    )
-
-    assert_scalesweep_mse_matches_ref(
-        out,
-        out_scale,
-        x,
-        out_ref,
-        scale_ref,
-        is_sf_swizzled_layout,
-    )
