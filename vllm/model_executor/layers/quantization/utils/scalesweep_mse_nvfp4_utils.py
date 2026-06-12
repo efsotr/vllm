@@ -680,37 +680,3 @@ direct_register_custom_op(
     fake_impl=_scalesweep_mse_nvfp4_quant_out_fake,
     tags=(torch.Tag.out_variant,),
 )
-
-
-def scalesweep_mse_nvfp4_quant(
-    input: torch.Tensor,
-    input_scale: torch.Tensor,
-    is_sf_swizzled_layout: bool = True,
-    padded_n: int | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    assert input.ndim >= 1, f"input.ndim needs to be >= 1, but got {input.ndim}."
-    other_dims = 1 if input.ndim == 1 else -1
-    input = input.reshape(other_dims, input.shape[-1])
-    _, n = input.shape
-
-    assert n % BLOCK_SIZE == 0, (
-        f"last dim has to be multiple of {BLOCK_SIZE}, but got {n}."
-    )
-    assert input.dtype in (torch.float16, torch.bfloat16), (
-        f"input.dtype needs to be fp16 or bf16 but got {input.dtype}."
-    )
-    assert input_scale.dtype == torch.float32, (
-        f"input_scale.dtype needs to be fp32 but got {input_scale.dtype}."
-    )
-    if padded_n is not None:
-        assert padded_n >= n, f"padded_n must be >= n, got padded_n={padded_n}, n={n}."
-        assert padded_n % BLOCK_SIZE == 0, (
-            f"padded_n has to be a multiple of {BLOCK_SIZE}, but got {padded_n}."
-        )
-
-    return torch.ops.vllm.scalesweep_mse_nvfp4_quant(
-        input.contiguous(),
-        input_scale,
-        is_sf_swizzled_layout,
-        padded_n,
-    )
