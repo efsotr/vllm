@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from collections.abc import Callable
+
 import pytest
 import torch
 
@@ -11,6 +13,10 @@ from vllm.model_executor.layers.quantization.utils.scalesweep_mse_nvfp4_utils im
     LOWER_BOUND,
     REF_MAX_SCALE_RAW,
     UPPER_BOUND,
+)
+from vllm.model_executor.layers.quantization.utils.scalesweep_nvfp4_utils import (
+    scalesweep128_nvfp4_quant_impl,
+    scalesweep_nvfp4_quant_impl,
 )
 from vllm.platforms import current_platform
 from vllm.scalar_type import scalar_types
@@ -798,4 +804,54 @@ def test_scalesweep_mse128_nvfp4_quant(
         out_ref,
         scale_ref,
         is_sf_swizzled_layout,
+    )
+
+
+@pytest.mark.parametrize(
+    ("backend", "baseline_backend", "op"),
+    [
+        ("scalesweep", "scalesweep_mse", scalesweep_nvfp4_quant_impl),
+        ("scalesweep128", "scalesweep_mse128", scalesweep128_nvfp4_quant_impl),
+    ],
+)
+@pytest.mark.parametrize("is_sf_swizzled_layout", [True, False])
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+@torch.inference_mode()
+def test_scalesweep_ones_importance_matches_mse(
+    backend: str,
+    baseline_backend: str,
+    op: Callable[..., tuple[torch.Tensor, torch.Tensor]],
+    is_sf_swizzled_layout: bool,
+    device: str,
+) -> None:
+    generator = torch.Generator(device=device)
+    generator.manual_seed(321)
+    x = torch.randn(
+        (4, 64), device=device, dtype=torch.float16, generator=generator
+    )
+    global_scale_inv = compute_global_scale_inv(x)
+
+    expected_out, expected_scale = ops.scaled_fp4_quant(
+        x,
+        global_scale_inv,
+        is_sf_swizzled_layout=is_sf_swizzled_layout,
+        backend=baseline_backend,
+    )
+    out, out_scale = ops.scaled_fp4_quant(
+        x,
+        global_scale_inv,
+        is_sf_swizzled_layout=is_sf_swizzled_layout,
+        backend=backend,
+    )
+    direct_out, direct_scale = op(
+        x, global_scale_inv, is_sf_swizzled_layout, None
+    )
+
+    torch.testing.assert_close(out, expected_out)
+    torch.testing.assert_close(
+        out_scale.view(torch.uint8), expected_scale.view(torch.uint8)
+    )
+    torch.testing.assert_close(direct_out, expected_out)
+    torch.testing.assert_close(
+        direct_scale.view(torch.uint8), expected_scale.view(torch.uint8)
     )

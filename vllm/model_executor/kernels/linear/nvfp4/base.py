@@ -17,6 +17,8 @@ NvFp4ActQuantBackend = Literal[
     "flashinfer_cudnn",
     "b12x",
     "fbgemm",
+    "scalesweep",
+    "scalesweep128",
     "scalesweep_mse",
     "scalesweep_mse128",
 ]

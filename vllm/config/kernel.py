@@ -214,6 +214,8 @@ ActQuantBackend = Literal[
     "flashinfer_cudnn",
     "b12x",
     "fbgemm",
+    "scalesweep",
+    "scalesweep128",
     "scalesweep_mse",
     "scalesweep_mse128",
 ]
@@ -321,6 +323,9 @@ class KernelConfig:
       FlashInfer cuDNN GEMM
     - "b12x": Use the standard scaled_fp4_quant path for FlashInfer B12x GEMM
     - "fbgemm": Use the standard scaled_fp4_quant path for FBGEMM GEMM
+    - "scalesweep": Sweep nearby FP8 scales with importance-weighted MSE
+    - "scalesweep128": Sweep all positive finite FP8 E4M3 scales with
+      importance-weighted MSE
     - "scalesweep_mse": Sweep FP8 scales near the block's base scale
     - "scalesweep_mse128": Sweep every positive finite FP8 E4M3 scale"""
 

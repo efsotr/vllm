@@ -22,6 +22,18 @@ FLOAT8_E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max
 PROVIDER_CFGS = {
     "vllm": dict(backend="vllm", is_sf_swizzled_layout=False, enabled=True),
     "vllm-swizzle": dict(backend="vllm", is_sf_swizzled_layout=True, enabled=True),
+    "scalesweep": dict(
+        backend="scalesweep", is_sf_swizzled_layout=False, enabled=True
+    ),
+    "scalesweep-swizzle": dict(
+        backend="scalesweep", is_sf_swizzled_layout=True, enabled=True
+    ),
+    "scalesweep128": dict(
+        backend="scalesweep128", is_sf_swizzled_layout=False, enabled=True
+    ),
+    "scalesweep128-swizzle": dict(
+        backend="scalesweep128", is_sf_swizzled_layout=True, enabled=True
+    ),
     "scalesweep_mse": dict(
         backend="scalesweep_mse", is_sf_swizzled_layout=False, enabled=True
     ),
@@ -77,7 +89,13 @@ def benchmark(batch_size, provider, N, K):
 
     cfg = PROVIDER_CFGS[provider]
 
-    if cfg["backend"] in ("vllm", "scalesweep_mse", "scalesweep_mse128"):
+    if cfg["backend"] in (
+        "vllm",
+        "scalesweep",
+        "scalesweep128",
+        "scalesweep_mse",
+        "scalesweep_mse128",
+    ):
         # vLLM's FP4 quantization
         if cfg["is_sf_swizzled_layout"]:
             ms, min_ms, max_ms = triton.testing.do_bench_cudagraph(

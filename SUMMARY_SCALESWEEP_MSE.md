@@ -29,6 +29,25 @@ vllm serve NVFP4_MODEL_ID_OR_PATH --linear-backend cutlass \
   --act-quant-backend scalesweep_mse128
 ```
 
+Importance-weighted ScaleSweep around the block's base scale:
+
+```bash
+vllm serve NVFP4_MODEL_ID_OR_PATH --linear-backend cutlass \
+  --act-quant-backend scalesweep
+```
+
+Importance-weighted ScaleSweep over all positive finite FP8 E4M3 scales:
+
+```bash
+vllm serve NVFP4_MODEL_ID_OR_PATH --linear-backend cutlass \
+  --act-quant-backend scalesweep128
+```
+
+For initial validation, both importance-weighted entry points create a
+`torch.float32` importance tensor of ones inside the ScaleSweep function. This
+makes their selected scales and quantized output directly comparable with the
+corresponding unweighted MSE implementations.
+
 These options change only dense NVFP4 activation quantization. They do not
 change checkpoint weight quantization or the CUTLASS GEMM backend. FlashInfer
 NVFP4 kernels keep their original activation quantizers.
@@ -44,21 +63,30 @@ NVFP4 kernels keep their original activation quantizers.
   values `1..126` and bitcasts each `uint8` value to FP8 E4M3. Both modes keep
   the scale with the lowest FP4 E2M1 reconstruction error and support linear,
   128x4-swizzled, and padded outputs.
+- [`scalesweep_nvfp4_utils.py`](vllm/model_executor/layers/quantization/utils/scalesweep_nvfp4_utils.py)
+  adds `scalesweep` and `scalesweep128`. It loads 16 shared per-column
+  importance values for every quantization block and minimizes importance-
+  weighted FP4 E2M1 reconstruction error. The 16-value error is accumulated
+  in the inline-assembly path, matching the unweighted MSE quantizer. Its
+  accumulator uses FMA for the weighted first value plus the running error.
+  Short 16-value parameter, unpacking, and call lists use four values per
+  line; longer expressions remain vertically expanded. Its public output path
+  currently creates an all-ones importance tensor for testability.
 - [`vllm/_custom_ops.py`](vllm/_custom_ops.py) dispatches
-  `scaled_fp4_quant` to the matching ScaleSweep `.out` op for
-  `backend="scalesweep_mse"` or `backend="scalesweep_mse128"`.
+  `scaled_fp4_quant` to the matching ScaleSweep `.out` op for all four
+  ScaleSweep backends and lazily registers the importance-weighted custom ops.
 
 ### Configuration and NVFP4 linear integration
 
-- [`vllm/config/kernel.py`](vllm/config/kernel.py) defines both ScaleSweep
+- [`vllm/config/kernel.py`](vllm/config/kernel.py) defines all four ScaleSweep
   activation backend values and normalizes CLI spelling.
 - [`vllm/engine/arg_utils.py`](vllm/engine/arg_utils.py) exposes
   `--act-quant-backend` and transfers it into `KernelConfig`.
 - [`vllm/model_executor/kernels/linear/__init__.py`](vllm/model_executor/kernels/linear/__init__.py)
   reads the configured activation backend during NVFP4 kernel initialization.
 - [`vllm/model_executor/kernels/linear/nvfp4/base.py`](vllm/model_executor/kernels/linear/nvfp4/base.py)
-  defines the accepted backend type and stores the override in the layer
-  configuration.
+  adds `scalesweep` and `scalesweep128` to the accepted backend type and stores
+  the override in the layer configuration.
 - [`vllm/model_executor/kernels/linear/nvfp4/__init__.py`](vllm/model_executor/kernels/linear/nvfp4/__init__.py)
   exports the activation backend type.
 - [`vllm/model_executor/kernels/linear/nvfp4/cutlass.py`](vllm/model_executor/kernels/linear/nvfp4/cutlass.py)
@@ -70,9 +98,11 @@ NVFP4 kernels keep their original activation quantizers.
 ### Benchmark and tests
 
 - [`benchmark_nvfp4_quant.py`](benchmarks/kernels/benchmark_nvfp4_quant.py) adds
-  linear and swizzled providers for both ScaleSweep modes.
+  linear and swizzled providers for all four ScaleSweep modes.
 - [`test_scalesweep_mse_nvfp4_quant.py`](tests/kernels/quantization/test_scalesweep_mse_nvfp4_quant.py)
   covers FP16/BF16 correctness, custom-op dispatch, scale layouts, padding,
-  bounded candidates, and the full `1..126` reference sweep.
+  bounded candidates, the full `1..126` reference sweep, and verifies that the
+  all-ones weighted modes match their MSE baselines through dispatch and direct
+  custom-op calls.
 - [`SUMMARY_SCALESWEEP_MSE.md`](SUMMARY_SCALESWEEP_MSE.md) records the command
   comparison and this complete file-level trace.

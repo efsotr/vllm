@@ -41,22 +41,10 @@ def _swizzled_scale_offsets(
 
 @triton.jit
 def _fp32x16_to_e2m1_u32x2(
-    x0,
-    x1,
-    x2,
-    x3,
-    x4,
-    x5,
-    x6,
-    x7,
-    x8,
-    x9,
-    x10,
-    x11,
-    x12,
-    x13,
-    x14,
-    x15,
+    x0, x1, x2, x3,
+    x4, x5, x6, x7,
+    x8, x9, x10, x11,
+    x12, x13, x14, x15,
 ):
     lo, hi = tl.inline_asm_elementwise(
         asm="""
@@ -85,22 +73,10 @@ def _fp32x16_to_e2m1_u32x2(
         """,
         constraints="=r,=r,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f,f",
         args=[
-            x0,
-            x1,
-            x2,
-            x3,
-            x4,
-            x5,
-            x6,
-            x7,
-            x8,
-            x9,
-            x10,
-            x11,
-            x12,
-            x13,
-            x14,
-            x15,
+            x0, x1, x2, x3,
+            x4, x5, x6, x7,
+            x8, x9, x10, x11,
+            x12, x13, x14, x15,
         ],
         dtype=(tl.uint32, tl.uint32),
         is_pure=True,
@@ -181,22 +157,10 @@ def _fp32x2_e2m1_quant_squared_error_acc(acc, x0, x1):
 
 @triton.jit
 def _scaled_fp32x16_e2m1_quant_squared_error(
-    x0,
-    x1,
-    x2,
-    x3,
-    x4,
-    x5,
-    x6,
-    x7,
-    x8,
-    x9,
-    x10,
-    x11,
-    x12,
-    x13,
-    x14,
-    x15,
+    x0, x1, x2, x3,
+    x4, x5, x6, x7,
+    x8, x9, x10, x11,
+    x12, x13, x14, x15,
 ):
     err = _fp32x2_e2m1_quant_squared_error(x0, x1)
     err = _fp32x2_e2m1_quant_squared_error_acc(err, x2, x3)
@@ -210,22 +174,10 @@ def _scaled_fp32x16_e2m1_quant_squared_error(
 
 @triton.jit
 def _fp32x16_e2m1_quant_squared_error(
-    v0,
-    v1,
-    v2,
-    v3,
-    v4,
-    v5,
-    v6,
-    v7,
-    v8,
-    v9,
-    v10,
-    v11,
-    v12,
-    v13,
-    v14,
-    v15,
+    v0, v1, v2, v3,
+    v4, v5, v6, v7,
+    v8, v9, v10, v11,
+    v12, v13, v14, v15,
     inv_scale,
     scale,
 ):
@@ -252,22 +204,10 @@ def _fp32x16_e2m1_quant_squared_error(
 
 @triton.jit
 def _max_abs_16(
-    v0,
-    v1,
-    v2,
-    v3,
-    v4,
-    v5,
-    v6,
-    v7,
-    v8,
-    v9,
-    v10,
-    v11,
-    v12,
-    v13,
-    v14,
-    v15,
+    v0, v1, v2, v3,
+    v4, v5, v6, v7,
+    v8, v9, v10, v11,
+    v12, v13, v14, v15,
 ):
     m0 = tl.maximum(tl.abs(v0), tl.abs(v1))
     m1 = tl.maximum(tl.abs(v2), tl.abs(v3))
@@ -384,22 +324,10 @@ def _scalesweep_mse_nvfp4_quant_kernel(
         input_block_mask = output_block_mask & (col < BLOCKS_PER_COL_IN)
 
     (
-        v0,
-        v1,
-        v2,
-        v3,
-        v4,
-        v5,
-        v6,
-        v7,
-        v8,
-        v9,
-        v10,
-        v11,
-        v12,
-        v13,
-        v14,
-        v15,
+        v0, v1, v2, v3,
+        v4, v5, v6, v7,
+        v8, v9, v10, v11,
+        v12, v13, v14, v15,
     ) = _load_normalized_16_cols(
         input_ptr,
         input_block_offsets,
@@ -408,22 +336,10 @@ def _scalesweep_mse_nvfp4_quant_kernel(
     )
 
     abs_max = _max_abs_16(
-        v0,
-        v1,
-        v2,
-        v3,
-        v4,
-        v5,
-        v6,
-        v7,
-        v8,
-        v9,
-        v10,
-        v11,
-        v12,
-        v13,
-        v14,
-        v15,
+        v0, v1, v2, v3,
+        v4, v5, v6, v7,
+        v8, v9, v10, v11,
+        v12, v13, v14, v15,
     )
     base_scale = abs_max * (1.0 / 6.0)
     base_raw = base_scale.to(tl.float8e4nv).to(tl.uint8, bitcast=True).to(tl.int32)
@@ -444,22 +360,10 @@ def _scalesweep_mse_nvfp4_quant_kernel(
         inv_scale_i = 1.0 / scale_i
 
         mse_i = _fp32x16_e2m1_quant_squared_error(
-            v0,
-            v1,
-            v2,
-            v3,
-            v4,
-            v5,
-            v6,
-            v7,
-            v8,
-            v9,
-            v10,
-            v11,
-            v12,
-            v13,
-            v14,
-            v15,
+            v0, v1, v2, v3,
+            v4, v5, v6, v7,
+            v8, v9, v10, v11,
+            v12, v13, v14, v15,
             inv_scale_i,
             scale_i,
         )

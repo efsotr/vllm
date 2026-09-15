@@ -1637,8 +1637,18 @@ def scaled_fp4_quant(
             f"padded_n has to be a multiple of {block_size}, but got {padded_n}."
         )
 
-    use_scalesweep_mse = backend in ("scalesweep_mse", "scalesweep_mse128")
-    use_8x4_sf_layout = "trtllm" in backend and not use_scalesweep_mse and m <= 32
+    use_scalesweep = backend in (
+        "scalesweep",
+        "scalesweep128",
+        "scalesweep_mse",
+        "scalesweep_mse128",
+    )
+    if backend in ("scalesweep", "scalesweep128"):
+        from vllm.model_executor.layers.quantization.utils import (
+            scalesweep_nvfp4_utils as _,  # noqa: F401
+        )
+
+    use_8x4_sf_layout = "trtllm" in backend and not use_scalesweep and m <= 32
     if use_8x4_sf_layout and padded_n is not None and padded_n != n:
         # TODO: support this case
         raise ValueError("padded_n is not supported with TRTLLM 8x4 scale layout.")
@@ -1655,8 +1665,24 @@ def scaled_fp4_quant(
             is_sf_swizzled_layout,
             padded_n=padded_n,
         )
-        if use_scalesweep_mse:
-            if backend == "scalesweep_mse128":
+        if use_scalesweep:
+            if backend == "scalesweep128":
+                torch.ops.vllm.scalesweep128_nvfp4_quant.out(
+                    input,
+                    input_global_scale,
+                    is_sf_swizzled_layout,
+                    output=output,
+                    output_scale=output_scale,
+                )
+            elif backend == "scalesweep":
+                torch.ops.vllm.scalesweep_nvfp4_quant.out(
+                    input,
+                    input_global_scale,
+                    is_sf_swizzled_layout,
+                    output=output,
+                    output_scale=output_scale,
+                )
+            elif backend == "scalesweep_mse128":
                 torch.ops.vllm.scalesweep_mse128_nvfp4_quant.out(
                     input,
                     input_global_scale,
