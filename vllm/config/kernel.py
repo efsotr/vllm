@@ -206,6 +206,18 @@ LinearBackend = Literal[
     "xpu_woq",
 ]
 
+ActQuantBackend = Literal[
+    "auto",
+    "cutlass",
+    "flashinfer_cutlass",
+    "flashinfer_trtllm",
+    "flashinfer_cudnn",
+    "b12x",
+    "fbgemm",
+    "scalesweep_mse",
+    "scalesweep_mse128",
+]
+
 
 @config
 class KernelConfig:
@@ -295,6 +307,23 @@ class KernelConfig:
     - "xpu_woq": Use XPU kernels for weight-only quantization (e.g. W8A16)
     """
 
+    act_quant_backend: ActQuantBackend = "auto"
+    """Backend for NVFP4 activation quantization. Available options:
+
+    - "auto": Use the activation quantization backend selected by the GEMM
+      backend
+    - "cutlass": Use the standard CUDA scaled_fp4_quant path
+    - "flashinfer_cutlass": Use the standard scaled_fp4_quant path for
+      FlashInfer CUTLASS GEMM
+    - "flashinfer_trtllm": Use TRTLLM-specific scaled_fp4_quant layout when
+      supported
+    - "flashinfer_cudnn": Use the standard scaled_fp4_quant path for
+      FlashInfer cuDNN GEMM
+    - "b12x": Use the standard scaled_fp4_quant path for FlashInfer B12x GEMM
+    - "fbgemm": Use the standard scaled_fp4_quant path for FBGEMM GEMM
+    - "scalesweep_mse": Sweep FP8 scales near the block's base scale
+    - "scalesweep_mse128": Sweep every positive finite FP8 E4M3 scale"""
+
     @field_validator("moe_backend", mode="before")
     @classmethod
     def _normalize_moe_backend(cls, value: Any) -> Any:
@@ -305,6 +334,13 @@ class KernelConfig:
     @field_validator("linear_backend", mode="before")
     @classmethod
     def _normalize_linear_backend(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.lower().replace("-", "_")
+        return value
+
+    @field_validator("act_quant_backend", mode="before")
+    @classmethod
+    def _normalize_act_quant_backend(cls, value: Any) -> Any:
         if isinstance(value, str):
             return value.lower().replace("-", "_")
         return value

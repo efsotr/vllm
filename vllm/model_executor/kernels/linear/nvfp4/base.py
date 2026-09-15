@@ -3,10 +3,23 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Literal
 
 import torch
 
 from vllm.model_executor.layers.quantization.utils.quant_utils import QuantKey
+
+NvFp4ActQuantBackend = Literal[
+    "auto",
+    "cutlass",
+    "flashinfer_cutlass",
+    "flashinfer_trtllm",
+    "flashinfer_cudnn",
+    "b12x",
+    "fbgemm",
+    "scalesweep_mse",
+    "scalesweep_mse128",
+]
 
 
 @dataclass
@@ -18,7 +31,12 @@ class NvFp4LinearLayerConfig:
     scales for both weights and activations.
     """
 
-    pass
+    act_quant_backend: NvFp4ActQuantBackend = "auto"
+
+    def get_act_quant_backend(self, default_backend: str) -> str:
+        if self.act_quant_backend == "auto":
+            return default_backend
+        return self.act_quant_backend
 
 
 class NvFp4LinearKernel(ABC):

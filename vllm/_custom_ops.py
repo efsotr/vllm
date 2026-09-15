@@ -1637,7 +1637,8 @@ def scaled_fp4_quant(
             f"padded_n has to be a multiple of {block_size}, but got {padded_n}."
         )
 
-    use_8x4_sf_layout = True if "trtllm" in backend and m <= 32 else False  # noqa: SIM210
+    use_scalesweep_mse = backend in ("scalesweep_mse", "scalesweep_mse128")
+    use_8x4_sf_layout = "trtllm" in backend and not use_scalesweep_mse and m <= 32
     if use_8x4_sf_layout and padded_n is not None and padded_n != n:
         # TODO: support this case
         raise ValueError("padded_n is not supported with TRTLLM 8x4 scale layout.")
@@ -1654,13 +1655,31 @@ def scaled_fp4_quant(
             is_sf_swizzled_layout,
             padded_n=padded_n,
         )
-        torch.ops._C.scaled_fp4_quant.out(
-            input,
-            input_global_scale,
-            is_sf_swizzled_layout,
-            output=output,
-            output_scale=output_scale,
-        )
+        if use_scalesweep_mse:
+            if backend == "scalesweep_mse128":
+                torch.ops.vllm.scalesweep_mse128_nvfp4_quant.out(
+                    input,
+                    input_global_scale,
+                    is_sf_swizzled_layout,
+                    output=output,
+                    output_scale=output_scale,
+                )
+            else:
+                torch.ops.vllm.scalesweep_mse_nvfp4_quant.out(
+                    input,
+                    input_global_scale,
+                    is_sf_swizzled_layout,
+                    output=output,
+                    output_scale=output_scale,
+                )
+        else:
+            torch.ops._C.scaled_fp4_quant.out(
+                input,
+                input_global_scale,
+                is_sf_swizzled_layout,
+                output=output,
+                output_scale=output_scale,
+            )
 
     output_scale = output_scale.view(torch.float8_e4m3fn)
     return output, output_scale
