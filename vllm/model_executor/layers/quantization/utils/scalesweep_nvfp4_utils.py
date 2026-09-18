@@ -144,7 +144,7 @@ def _load_shared_importance_16_cols(
     BLOCKS_PER_COL_IN: tl.constexpr,
 ):
     col = block_offsets % BLOCKS_PER_COL_IN
-    base_elem = col * BLOCK_SIZE
+    base_elem = col * 16
     return (
         tl.load(importance_ptr + base_elem + 0, mask=block_mask, other=0.0),
         tl.load(importance_ptr + base_elem + 1, mask=block_mask, other=0.0),
