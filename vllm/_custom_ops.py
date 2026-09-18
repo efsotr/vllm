@@ -116,6 +116,11 @@ if hasattr(torch.ops, "_C") and hasattr(torch.ops._C, "scaled_fp4_quant"):
         return None
 
 
+from vllm.model_executor.layers.quantization.utils import (  # noqa: E402
+    scalesweep_nvfp4_utils as _,  # noqa: F401
+)
+
+
 # page attention ops
 def paged_attention_rocm(
     out: torch.Tensor,
@@ -1643,11 +1648,6 @@ def scaled_fp4_quant(
         "scalesweep_mse",
         "scalesweep_mse128",
     )
-    if backend in ("scalesweep", "scalesweep128"):
-        from vllm.model_executor.layers.quantization.utils import (
-            scalesweep_nvfp4_utils as _,  # noqa: F401
-        )
-
     use_8x4_sf_layout = "trtllm" in backend and not use_scalesweep and m <= 32
     if use_8x4_sf_layout and padded_n is not None and padded_n != n:
         # TODO: support this case
