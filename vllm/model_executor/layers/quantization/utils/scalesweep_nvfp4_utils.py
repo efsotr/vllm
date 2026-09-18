@@ -15,6 +15,7 @@ from vllm.model_executor.layers.quantization.utils.scalesweep_mse_nvfp4_utils im
     _scalesweep_mse_nvfp4_quant_fake,
     _scalesweep_mse_nvfp4_quant_out_fake,
     _swizzled_scale_offsets,
+    scalesweep_autotune,
 )
 from vllm.triton_utils import tl, triton
 from vllm.utils.math_utils import round_up
@@ -165,6 +166,7 @@ def _load_shared_importance_16_cols(
     )
 
 
+@scalesweep_autotune
 @triton.jit
 def _scalesweep_nvfp4_quant_kernel(
     input_ptr,
@@ -173,6 +175,7 @@ def _scalesweep_nvfp4_quant_kernel(
     output_i32_ptr,
     global_scale_inv_ptr,
     NUM_OUTPUT_BLOCKS: tl.constexpr,
+    NUM_ROW: tl.constexpr,
     BLOCKS_PER_COL_IN: tl.constexpr,
     BLOCKS_PER_COL_OUT: tl.constexpr,
     LOWER_BOUND: tl.constexpr,
@@ -309,6 +312,7 @@ def _scalesweep_nvfp4_quant_out(
         output_i32,
         input_scale,
         num_output_blocks,
+        NUM_ROW=num_row,
         BLOCKS_PER_COL_IN=blocks_per_col_in,
         BLOCKS_PER_COL_OUT=blocks_per_col_out,
         LOWER_BOUND=LOWER_BOUND,
@@ -319,8 +323,6 @@ def _scalesweep_nvfp4_quant_out(
         USE_FULL_RANGE=use_full_range,
         IS_SWIZZLE_SCALE=is_sf_swizzled_layout,
         BLOCKS_PER_COL_OUT_PAD=round_up(blocks_per_col_out, 4),
-        BLOCKS_PER_PROGRAM=512,
-        num_warps=16,
     )
 
 

@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 
+import os
+
 import torch
 
 from vllm._custom_ops import create_fp4_output_tensors
@@ -266,30 +268,36 @@ def _load_normalized_16_cols(ptr, block_offsets, block_mask, global_scale_inv):
     )
 
 
-SCALESWEEP_CONFIGS = [
-    # triton.Config({"BLOCKS_PER_PROGRAM": 32}, num_warps=1),
-    # triton.Config({"BLOCKS_PER_PROGRAM": 64}, num_warps=2),
-    # triton.Config({"BLOCKS_PER_PROGRAM": 128}, num_warps=4),
-    # triton.Config({"BLOCKS_PER_PROGRAM": 256}, num_warps=8),
-    triton.Config({"BLOCKS_PER_PROGRAM": 512}, num_warps=16),
-    # triton.Config({"BLOCKS_PER_PROGRAM": 1024}, num_warps=32),
-]
+SCALESWEEP_CONFIGS = [triton.Config({"BLOCKS_PER_PROGRAM": 512}, num_warps=16)]
+if os.environ.get("SCALESWEEP_TUNE") == "1":
+    SCALESWEEP_CONFIGS = [
+        triton.Config({"BLOCKS_PER_PROGRAM": 32}, num_warps=1),
+        triton.Config({"BLOCKS_PER_PROGRAM": 64}, num_warps=2),
+        triton.Config({"BLOCKS_PER_PROGRAM": 128}, num_warps=4),
+        triton.Config({"BLOCKS_PER_PROGRAM": 256}, num_warps=8),
+        triton.Config({"BLOCKS_PER_PROGRAM": 512}, num_warps=16),
+        triton.Config({"BLOCKS_PER_PROGRAM": 1024}, num_warps=32),
+    ]
 
 
-# @triton.heuristics({"LOG2_NUM_ROW": lambda args: int(math.log2(args["NUM_ROW"]))})
-# @triton.autotune(
-#     configs=SCALESWEEP_CONFIGS,
-#     key=[
-#         "LOG2_NUM_ROW",
-#         "BLOCKS_PER_COL_IN",
-#         "BLOCKS_PER_COL_OUT",
-#         "LOWER_BOUND",
-#         "NUM_CANDIDATES",
-#         "MAX_SCALE_RAW",
-#         "IS_SWIZZLE_SCALE",
-#         "BLOCKS_PER_COL_OUT_PAD",
-#     ],
-# )
+def scalesweep_autotune(kernel):
+    return triton.autotune(
+        configs=SCALESWEEP_CONFIGS,
+        key=[
+            "NUM_ROW",
+            "BLOCKS_PER_COL_IN",
+            "BLOCKS_PER_COL_OUT",
+            "LOWER_BOUND",
+            "NUM_CANDIDATES",
+            "MAX_SCALE_RAW",
+            "USE_FULL_RANGE",
+            "IS_SWIZZLE_SCALE",
+            "BLOCKS_PER_COL_OUT_PAD",
+        ],
+    )(kernel)
+
+
+@scalesweep_autotune
 @triton.jit
 def _scalesweep_mse_nvfp4_quant_kernel(
     input_ptr,
@@ -306,7 +314,6 @@ def _scalesweep_mse_nvfp4_quant_kernel(
     USE_FULL_RANGE: tl.constexpr,
     IS_SWIZZLE_SCALE: tl.constexpr,
     BLOCKS_PER_COL_OUT_PAD: tl.constexpr,
-    # LOG2_NUM_ROW: tl.constexpr,
     BLOCKS_PER_PROGRAM: tl.constexpr,
 ):
     global_scale_inv = tl.load(global_scale_inv_ptr)
@@ -447,8 +454,6 @@ def _scalesweep_mse_nvfp4_quant_out(
         USE_FULL_RANGE=use_full_range,
         IS_SWIZZLE_SCALE=is_sf_swizzled_layout,
         BLOCKS_PER_COL_OUT_PAD=round_up(blocks_per_col_out, 4),
-        BLOCKS_PER_PROGRAM=512,
-        num_warps=16,
     )
 
 

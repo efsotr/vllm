@@ -62,7 +62,10 @@ NVFP4 kernels keep their original activation quantizers.
   `base_raw - 3` through `base_raw + 7`; `scalesweep_mse128` enumerates raw
   values `1..126` and bitcasts each `uint8` value to FP8 E4M3. Both modes keep
   the scale with the lowest FP4 E2M1 reconstruction error and support linear,
-  128x4-swizzled, and padded outputs.
+  128x4-swizzled, and padded outputs. Its shared autotune decorator is also
+  used by the importance-weighted kernel: it uses only the 512-block config by
+  default, or tests 32, 64, 128, 256, 512, and 1024 blocks per program when
+  `SCALESWEEP_TUNE=1` is set before import.
 - [`scalesweep_nvfp4_utils.py`](vllm/model_executor/layers/quantization/utils/scalesweep_nvfp4_utils.py)
   adds `scalesweep` and `scalesweep128`. It loads 16 shared per-column
   importance values for every quantization block and minimizes importance-
