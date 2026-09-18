@@ -117,7 +117,8 @@ if hasattr(torch.ops, "_C") and hasattr(torch.ops._C, "scaled_fp4_quant"):
 
 
 from vllm.model_executor.layers.quantization.utils import (  # noqa: E402
-    scalesweep_nvfp4_utils as _,  # noqa: F401
+    scalesweep_mse_nvfp4_utils as _scalesweep_mse_nvfp4_utils,  # noqa: F401
+    scalesweep_nvfp4_utils as _scalesweep_nvfp4_utils,  # noqa: F401
 )
 
 
