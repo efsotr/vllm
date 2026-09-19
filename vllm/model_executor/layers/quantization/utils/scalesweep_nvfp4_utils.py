@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from math import ceil, log2
+
 import torch
 
 from vllm._custom_ops import create_fp4_output_tensors
@@ -175,7 +177,7 @@ def _scalesweep_nvfp4_quant_kernel(
     output_i32_ptr,
     global_scale_inv_ptr,
     NUM_OUTPUT_BLOCKS: tl.constexpr,
-    NUM_ROW: tl.constexpr,
+    LOG2_NUM_ROW: tl.constexpr,
     BLOCKS_PER_COL_IN: tl.constexpr,
     BLOCKS_PER_COL_OUT: tl.constexpr,
     LOWER_BOUND: tl.constexpr,
@@ -312,7 +314,7 @@ def _scalesweep_nvfp4_quant_out(
         output_i32,
         input_scale,
         num_output_blocks,
-        NUM_ROW=num_row,
+        LOG2_NUM_ROW=int(ceil(log2(num_row))),
         BLOCKS_PER_COL_IN=blocks_per_col_in,
         BLOCKS_PER_COL_OUT=blocks_per_col_out,
         LOWER_BOUND=LOWER_BOUND,
