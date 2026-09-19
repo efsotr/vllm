@@ -314,7 +314,7 @@ def _scalesweep_nvfp4_quant_out(
         output_i32,
         input_scale,
         num_output_blocks,
-        LOG2_NUM_ROW=int(ceil(log2(num_row))),
+        LOG2_NUM_ROW=min(int(ceil(log2(num_row))), 7),
         BLOCKS_PER_COL_IN=blocks_per_col_in,
         BLOCKS_PER_COL_OUT=blocks_per_col_out,
         LOWER_BOUND=LOWER_BOUND,
